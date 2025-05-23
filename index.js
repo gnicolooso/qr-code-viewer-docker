@@ -71,6 +71,15 @@ app.post('/api/connected', (req, res) => {
     res.send('Status de conexão atualizado para conectado.');
 });
 
+// Endpoint para servir a imagem do QR code em base64 (removendo dependência externa)
+app.get('/api/qr-image', (req, res) => {
+    if (!qrCodeImageBase64) {
+        return res.status(204).json({ qrImage: null }); // 204: No Content
+    }
+    res.status(200).json({ qrImage: qrCodeImageBase64 });
+});
+
+
 // --- Página HTML que exibe o QR code graficamente ---
 app.get('/', async (req, res) => {
     const html = `
@@ -131,12 +140,14 @@ app.get('/', async (req, res) => {
             min-width: 300px;
             margin-bottom: 25px;
           }
-          #qr {
+          /* ALTERADO: ID de #qr para #qr-image */
+          #qr-image {
             width: 250px; /* Slightly smaller for better fit */
             height: 250px;
             display: none;
           }
-          #placeholder {
+          /* ALTERADO: ID de #placeholder para #qr-placeholder */
+          #qr-placeholder {
             color: #777;
             font-size: 1.1rem;
           }
@@ -210,8 +221,8 @@ app.get('/', async (req, res) => {
           <h1>Status do Bot WhatsApp</h1>
           <div class="status" id="status"><span class="icon">🔄</span><span>Carregando status...</span></div>
           <div class="qr-container">
-            <img id="qr" src="" alt="QR Code" />
-            <div id="placeholder">Aguardando QR Code do bot...</div>
+            <img id="qr-image" src="" alt="QR Code" />
+            <div id="qr-placeholder">Aguardando QR Code do bot...</div>
           </div>
           <p class="info-text" id="info-text">
             Mantenha esta página aberta para visualizar o status do bot.
@@ -227,163 +238,222 @@ app.get('/', async (req, res) => {
         </div>
 
         <script>
-          let currentQrImageBase64 = ""; // Para evitar recarregar a mesma imagem
+          let currentQrImageBase64 = ""; // Armazena a imagem QR em Base64 para exibição
+          let updateInterval; // Para o intervalo de atualização de status/QR
+          const CHECK_INTERVAL = 2000; // Intervalo de 2 segundos
 
-          const statusText = document.getElementById('status');
-          const statusIcon = statusText.querySelector('.icon');
-          const qrImage = document.getElementById('qr');
-          const placeholder = document.getElementById('placeholder');
-          const infoText = document.getElementById('info-text');
-          const resetButton = document.getElementById('resetButton');
-          const connectedButton = document.getElementById('connectedButton');
-          const resetLoader = document.getElementById('resetLoader');
-          const connectedLoader = document.getElementById('connectedLoader');
-
-          async function fetchStatus() {
+          // --- Início das Funções WorkspaceStatus() e WorkspaceQrImage() ---
+          async function WorkspaceStatus() {
             try {
-              const res = await fetch('/api/status');
-              if (!res.ok) throw new Error('Falha ao buscar status.');
-              const data = await res.json();
+              const response = await fetch('/api/status');
+              const data = await response.json();
+
+              const statusElement = document.getElementById('status');
+              // ALTERADO: Acessando o span dentro do statusElement para o texto principal
+              const statusTextSpan = statusElement.querySelector('span:last-child');
+              const statusIconSpan = statusElement.querySelector('.icon');
+              const infoTextElement = document.getElementById('info-text');
 
               if (data.connected) {
-                statusIcon.textContent = '✅';
-                statusText.querySelector('span:last-child').textContent = 'Bot conectado ao WhatsApp!';
-                infoText.textContent = 'O bot está online e pronto para receber mensagens.';
-                qrImage.style.display = 'none';
-                placeholder.style.display = 'block'; // Esconde o QR e mostra placeholder
-                placeholder.textContent = 'Bot conectado. Sem QR Code.';
-                resetButton.disabled = false; // Habilita o reset
-                connectedButton.style.display = 'none'; // Esconde botão de verificar
-              } else if (data.qrAvailable && data.isScanning) {
-                statusIcon.textContent = '📱';
-                statusText.querySelector('span:last-child').textContent = 'QR Code disponível. Escaneie!';
-                infoText.textContent = 'Abra o WhatsApp no seu celular, vá em "Aparelhos Conectados" e escaneie o QR Code acima.';
-                connectedButton.style.display = 'block'; // Mostra botão de verificar
-              } else {
-                statusIcon.textContent = '🔄';
-                statusText.querySelector('span:last-child').textContent = 'Aguardando QR Code do bot...';
-                infoText.textContent = 'O bot está iniciando ou se reconectando. Um QR Code aparecerá aqui em breve.';
-                qrImage.style.display = 'none';
-                placeholder.style.display = 'block';
-                placeholder.textContent = 'Aguardando QR Code do bot...';
-                resetButton.disabled = true; // Desabilita o reset enquanto não há QR
-                connectedButton.style.display = 'block'; // Mostra botão de verificar
+                statusIconSpan.textContent = '✅';
+                statusTextSpan.textContent = 'Bot conectado ao WhatsApp!';
+                infoTextElement.textContent = 'Você está conectado ao WhatsApp Web!';
+                statusElement.className = 'status connected'; // Adiciona classe de status para estilo
+                // Limpa o QR Code se estiver conectado
+                currentQrImageBase64 = ""; // IMPORTANTE: Reseta a imagem QR aqui
+                document.getElementById('qr-image').style.display = 'none'; // Esconde a imagem
+                document.getElementById('qr-placeholder').style.display = 'none'; // Esconde o placeholder
+                
+                // Nao interromper o intervalo, apenas garantir que o WorkspaceQrImage() seja chamado com 'false'
+                // para que a imagem do QR seja escondida. O setInterval já está no window.onload.
+
+              } else if (data.isScanning) {
+                statusIconSpan.textContent = '📸';
+                statusTextSpan.textContent = 'QR Code disponível. Escaneie!';
+                infoTextElement.textContent = 'Escaneie o QR Code com o WhatsApp para conectar.';
+                statusElement.className = 'status scanning'; // Adiciona classe de status para estilo
+                // O QR deve ser buscado por WorkspaceQrImage()
+
+              } else { // Caso não esteja conectado nem escaneando (Aguardando QR)
+                statusIconSpan.textContent = '⏳';
+                statusTextSpan.textContent = 'Aguardando QR Code do bot...';
+                infoTextElement.textContent = 'O bot está iniciando ou se reconectando. Um QR Code aparecerá aqui em breve.';
+                statusElement.className = 'status pending'; // Adiciona classe de status para estilo
+                currentQrImageBase64 = ""; // IMPORTANTE: Reseta a imagem QR aqui
+                // O display será tratado por WorkspaceQrImage(false)
               }
-            } catch (err) {
-              statusIcon.textContent = '❌';
-              statusText.querySelector('span:last-child').textContent = 'Erro ao buscar status.';
-              infoText.textContent = 'Não foi possível se comunicar com o serviço de status. Tente recarregar a página.';
-              console.error('Erro ao buscar status:', err);
-              resetButton.disabled = true; // Desabilita o reset em caso de erro
-              connectedButton.style.display = 'block'; // Mostra botão de verificar
+
+              // Se não houver QR disponível (nem isScanning, nem qrAvailable), garanta que a imagem seja limpa
+              // Isso é redundante com o bloco 'else' acima, mas manter por segurança
+              if (!data.qrAvailable && !data.isScanning && !data.connected) {
+                  currentQrImageBase64 = "";
+              }
+
+              // Chama a função de manipulação do QR Code após a atualização do status
+              // Passa 'true' se estiver escaneando OU se o QR estiver disponível (pode estar disponível mas não escaneando ainda)
+              WorkspaceQrImage(data.isScanning || data.qrAvailable); 
+              
+            } catch (error) {
+              console.error('Erro ao buscar status:', error);
+              const statusElement = document.getElementById('status');
+              const statusTextSpan = statusElement.querySelector('span:last-child');
+              const statusIconSpan = statusElement.querySelector('.icon');
+              const infoTextElement = document.getElementById('info-text');
+
+              statusIconSpan.textContent = '❌';
+              statusTextSpan.textContent = 'Erro na Conexão!';
+              statusElement.className = 'status error'; // Adiciona classe de status para estilo
+              infoTextElement.textContent = 'Não foi possível conectar ao servidor backend.';
+              currentQrImageBase64 = ""; // Em caso de erro, limpa o QR
+              WorkspaceQrImage(false); // Garante que o QR e placeholder sejam escondidos
             }
           }
 
-          async function fetchQrImage() {
-            try {
-              const res = await fetch('/api/qr-image'); // Novo endpoint para pegar a imagem base64
-              if (!res.ok) {
-                if (res.status === 204) { // No Content
-                  qrImage.style.display = 'none';
-                  placeholder.style.display = 'block';
-                  // Placeholder text set by fetchStatus
+          async function WorkspaceQrImage(shouldFetchQr = false) {
+            const qrImageElement = document.getElementById('qr-image'); // ALTERADO: ID
+            const qrPlaceholderElement = document.getElementById('qr-placeholder'); // ALTERADO: ID
+
+            if (shouldFetchQr) { // Só tenta buscar o QR se o status indicar que ele pode estar disponível
+              try {
+                const response = await fetch('/api/qr-image');
+                if (response.status === 204) { // No Content
+                  currentQrImageBase64 = ""; // Limpa se não houver QR
+                  qrImageElement.style.display = 'none';
+                  qrPlaceholderElement.style.display = 'block'; // Mostra placeholder
+                  qrPlaceholderElement.textContent = 'Aguardando QR Code do bot...'; // Define texto do placeholder
                 } else {
-                  throw new Error('Falha ao buscar imagem do QR.');
+                  const data = await response.json();
+                  if (data.qrImage) {
+                    currentQrImageBase64 = data.qrImage;
+                    qrImageElement.src = currentQrImageBase64;
+                    qrImageElement.style.display = 'block'; // Mostra a imagem
+                    qrPlaceholderElement.style.display = 'none'; // Esconde o placeholder
+                  } else {
+                    currentQrImageBase64 = ""; // Limpa se a resposta não tiver imagem
+                    qrImageElement.style.display = 'none';
+                    qrPlaceholderElement.style.display = 'block'; // Mostra placeholder
+                    qrPlaceholderElement.textContent = 'Aguardando QR Code do bot...'; // Define texto do placeholder
+                  }
                 }
-                return;
+              } catch (error) {
+                console.error('Erro ao buscar imagem do QR:', error);
+                currentQrImageBase64 = ""; // Em caso de erro, limpa o QR
+                qrImageElement.style.display = 'none';
+                qrPlaceholderElement.style.display = 'block'; // Mostra placeholder
+                qrPlaceholderElement.textContent = 'Erro ao carregar QR. Tente recarregar.'; // Define texto de erro
               }
-              const data = await res.json();
-              const qrImageBase64 = data.qrImage;
-
-              if (qrImageBase64 && qrImageBase64 !== currentQrImageBase64) {
-                qrImage.src = qrImageBase64;
-                qrImage.style.display = 'block';
-                placeholder.style.display = 'none';
-                currentQrImageBase64 = qrImageBase64;
-              } else if (!qrImageBase64) {
-                qrImage.style.display = 'none';
-                placeholder.style.display = 'block';
+            } else {
+              // Se shouldFetchQr for false (e.g., conectado ou aguardando QR), esconde a imagem
+              currentQrImageBase64 = "";
+              qrImageElement.style.display = 'none';
+              // Decide se mostra o placeholder baseado no status atual do bot
+              const statusElement = document.getElementById('status');
+              if (statusElement.querySelector('span:last-child').textContent.includes('Aguardando QR')) {
+                   qrPlaceholderElement.style.display = 'block';
+                   qrPlaceholderElement.textContent = 'Aguardando QR Code do bot...'; // Define texto do placeholder
+              } else if (statusElement.querySelector('span:last-child').textContent.includes('Conectado')) {
+                   qrPlaceholderElement.style.display = 'block'; // Mostrar placeholder quando conectado
+                   qrPlaceholderElement.textContent = 'Bot conectado. Sem QR Code para exibir.';
+              } else {
+                  qrPlaceholderElement.style.display = 'none'; // Esconde o placeholder em outros casos
               }
-            } catch (err) {
-              console.error('Erro ao buscar QR image:', err);
-              qrImage.style.display = 'none';
-              placeholder.style.display = 'block';
             }
           }
 
-          // Função para chamar o endpoint de reset
-          resetButton.addEventListener('click', async () => {
-            const confirmReset = confirm("Tem certeza que deseja resetar a sessão do bot? Isso irá desconectá-lo e exigirá um novo escaneamento do QR Code.");
-            if (!confirmReset) return;
-
-            resetButton.disabled = true;
-            resetLoader.style.display = 'inline-block';
-            statusText.querySelector('span:last-child').textContent = 'Reiniciando sessão...';
-            statusIcon.textContent = '🔄';
-            qrImage.style.display = 'none';
-            placeholder.style.display = 'block';
-            placeholder.textContent = 'Aguardando novo QR Code...';
+          // Função de inicialização e intervalo
+          async function fetchStatusAndQrImage() {
+              await WorkspaceStatus(); // Chama o status, que por sua vez chama WorkspaceQrImage
+          }
+          // --- Fim das Funções WorkspaceStatus() e WorkspaceQrImage() ---
 
 
-            try {
-              // A URL do seu bot principal, configure como variável de ambiente no microserviço
-              <script>
-                const botResetUrl = '${BOT_WEBHOOK_URL}/reset-session';
-              </script>
-              const res = await fetch(botResetUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
+          // REMOVIDO: const statusText, statusIcon, qrImage, placeholder, infoText
+          // Estes já estão sendo acessados dentro das novas funções ou não são mais necessários diretamente aqui.
+          // REMOVIDO: fetchStatus() e fetchQrImage() antigas.
+          // O CÓDIGO ABAIXO FOI SIMPLIFICADO E AJUSTADO PARA USAR A NOVA ESTRUTURA.
+
+          // Funções para os botões
+          // Adicione event listeners diretamente aos botões
+          document.getElementById('resetButton').addEventListener('click', async () => {
+              const confirmReset = confirm("Tem certeza que deseja resetar a sessão do bot? Isso irá desconectá-lo e exigirá um novo escaneamento do QR Code.");
+              if (!confirmReset) return;
+
+              const resetButton = document.getElementById('resetButton');
+              const resetLoader = document.getElementById('resetLoader');
+              const statusElement = document.getElementById('status');
+              const statusTextSpan = statusElement.querySelector('span:last-child');
+              const statusIconSpan = statusElement.querySelector('.icon');
+              const qrImageElement = document.getElementById('qr-image');
+              const qrPlaceholderElement = document.getElementById('qr-placeholder');
+
+              resetButton.disabled = true;
+              resetLoader.style.display = 'inline-block';
+              statusTextSpan.textContent = 'Reiniciando sessão...';
+              statusIconSpan.textContent = '🔄';
+              qrImageElement.style.display = 'none';
+              qrPlaceholderElement.style.display = 'block';
+              qrPlaceholderElement.textContent = 'Aguardando novo QR Code...';
+
+
+              try {
+                const botResetUrl = \`${BOT_WEBHOOK_URL}/reset-session\`;                
+                const res = await fetch(botResetUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json'
+                  }
+                });
+
+                if (res.ok) {
+                  alert('Sessão do bot resetada com sucesso! Um novo QR Code deve aparecer em breve.');
+                  // Forçar a busca de status e QR imediatamente após o reset
+                  await fetchStatusAndQrImage(); // Usa a nova função unificada
+                } else {
+                  const errorData = await res.text();
+                  alert(\`Erro ao resetar a sessão do bot: \${res.status} - \${errorData}\`);
+                  console.error('Erro ao resetar sessão:', res.status, errorData);
                 }
-              });
-
-              if (res.ok) {
-                alert('Sessão do bot resetada com sucesso! Um novo QR Code deve aparecer em breve.');
-                // Forçar a busca de status e QR imediatamente após o reset
-                await fetchStatus();
-                await fetchQrImage();
-              } else {
-                const errorData = await res.text(); // Pegar texto de erro
-                alert(\`Erro ao resetar a sessão do bot: \${res.status} - \${errorData}\`);
-                console.error('Erro ao resetar sessão:', res.status, errorData);
+              } catch (err) {
+                alert('Erro de rede ao tentar resetar a sessão do bot. Verifique a URL ou a conexão.');
+                console.error('Erro de rede no reset:', err);
+              } finally {
+                resetButton.disabled = false;
+                resetLoader.style.display = 'none';
               }
-            } catch (err) {
-              alert('Erro de rede ao tentar resetar a sessão do bot. Verifique a URL ou a conexão.');
-              console.error('Erro de rede no reset:', err);
-            } finally {
-              resetButton.disabled = false;
-              resetLoader.style.display = 'none';
-            }
           });
 
-          // Função para chamar o endpoint de "conected" (se precisar forçar, mas o bot já envia)
-          // Este botão pode ser removido ou transformado em um botão de "Atualizar Status"
-          connectedButton.addEventListener('click', async () => {
-            connectedButton.disabled = true;
-            connectedLoader.style.display = 'inline-block';
-            statusText.querySelector('span:last-child').textContent = 'Verificando conexão...';
-            statusIcon.textContent = '🔄';
+          // Botão "Verificar Conexão" agora apenas força uma atualização dos dados
+          document.getElementById('connectedButton').addEventListener('click', async () => {
+              const connectedButton = document.getElementById('connectedButton');
+              const connectedLoader = document.getElementById('connectedLoader');
+              const statusElement = document.getElementById('status');
+              const statusTextSpan = statusElement.querySelector('span:last-child');
+              const statusIconSpan = statusElement.querySelector('.icon');
 
-            try {
-              // Não há um endpoint no seu bot principal para verificar, apenas para ser notificado
-              // Então, este botão aqui apenas força a atualização da página de status
-              await fetchStatus();
-              await fetchQrImage();
-            } catch (err) {
-              alert('Erro ao tentar verificar a conexão.');
-              console.error('Erro na verificação de conexão:', err);
-            } finally {
-              connectedButton.disabled = false;
-              connectedLoader.style.display = 'none';
-            }
+              connectedButton.disabled = true;
+              connectedLoader.style.display = 'inline-block';
+              statusTextSpan.textContent = 'Verificando conexão...';
+              statusIconSpan.textContent = '🔄';
+
+              try {
+                // Apenas força a atualização do status e QR
+                await fetchStatusAndQrImage(); // Usa a nova função unificada
+              } catch (err) {
+                alert('Erro ao tentar verificar a conexão.');
+                console.error('Erro na verificação de conexão:', err);
+              } finally {
+                connectedButton.disabled = false;
+                connectedLoader.style.display = 'none';
+              }
           });
 
-
-          // Executar ao carregar a página
-          fetchStatus();
-          fetchQrImage();
-          setInterval(fetchStatus, 3000); // Atualiza status a cada 3 segundos
-          setInterval(fetchQrImage, 8000); // Atualiza QR a cada 8 segundos (QR muda com menos frequência)
+          // Inicializa a atualização quando a página carrega
+          window.onload = () => {
+              fetchStatusAndQrImage(); // Chama na carga inicial
+              // REMOVIDO: setInterval(fetchStatus, 3000); e setInterval(fetchQrImage, 8000);
+              // Apenas um setInterval é necessário, que chama fetchStatusAndQrImage
+              updateInterval = setInterval(fetchStatusAndQrImage, CHECK_INTERVAL);
+          };
         </script>
       </body>
     </html>
@@ -391,20 +461,10 @@ app.get('/', async (req, res) => {
     res.send(html);
 });
 
-// Novo endpoint para servir a imagem do QR code em base64 (removendo dependência externa)
-app.get('/api/qr-image', (req, res) => {
-    if (!qrCodeImageBase64) {
-        return res.status(204).json({ qrImage: null }); // 204: No Content
-    }
-    res.status(200).json({ qrImage: qrCodeImageBase64 });
-});
-
-
 // Ping automático a cada 4 minutos para manter Railway ativo (bot e microserviço)
-// **Cuidado:** Este ping está fazendo um GET na sua própria URL principal.
-// Para pingar o bot principal, use BOT_WEBHOOK_URL
 setInterval(() => {
-    axios.get(BOT_WEBHOOK_URL) // Pinga o endpoint principal do bot
+    // Pinga o endpoint principal do bot
+    axios.get(BOT_WEBHOOK_URL)
         .then(() => console.log('✅ Ping enviado para o bot principal para mantê-lo ativo.'))
         .catch(err => console.error('❌ Falha no ping automático do bot principal:', err.message));
 
