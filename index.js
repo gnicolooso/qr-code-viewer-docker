@@ -327,7 +327,9 @@ app.get('/', async (req, res) => {
 
             try {
               // A URL do seu bot principal, configure como variável de ambiente no microserviço
-              const botResetUrl = \`${BOT_WEBHOOK_URL}/reset-session\`;
+              <script>
+                const botResetUrl = '${BOT_WEBHOOK_URL}/reset-session';
+              </script>
               const res = await fetch(botResetUrl, {
                 method: 'POST',
                 headers: {
