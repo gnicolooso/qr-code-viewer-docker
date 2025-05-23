@@ -327,7 +327,7 @@ app.get('/', async (req, res) => {
 
             try {
               // A URL do seu bot principal, configure como variável de ambiente no microserviço
-              const botResetUrl = `${BOT_WEBHOOK_URL}/reset-session`;
+              const botResetUrl = '${BOT_WEBHOOK_URL}/reset-session';
               const res = await fetch(botResetUrl, {
                 method: 'POST',
                 headers: {
@@ -342,7 +342,7 @@ app.get('/', async (req, res) => {
                 await fetchQrImage();
               } else {
                 const errorData = await res.text(); // Pegar texto de erro
-                alert(`Erro ao resetar a sessão do bot: ${res.status} - ${errorData}`);
+                alert('Erro ao resetar a sessão do bot: ${res.status} - ${errorData}');
                 console.error('Erro ao resetar sessão:', res.status, errorData);
               }
             } catch (err) {
