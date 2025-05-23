@@ -344,7 +344,7 @@ app.get('/', async (req, res) => {
                 await fetchQrImage();
               } else {
                 const errorData = await res.text(); // Pegar texto de erro
-                alert(\`Erro ao resetar a sessão do bot: ${res.status} - ${errorData}\`);
+                alert(\`Erro ao resetar a sessão do bot: \${res.status} - \${errorData}\`);
                 console.error('Erro ao resetar sessão:', res.status, errorData);
               }
             } catch (err) {
