@@ -98,17 +98,18 @@ app.get('/', async (req, res) => {
             justify-content: center;
             min-height: 100vh;
             margin: 0;
-            background: #222; /* Fundo escuro simples */
-            color: #eee; /* Texto claro */
+            background: white; /* Fundo branco */
+            color: black; /* Texto preto */
           }
           #status-line {
             margin-bottom: 20px;
-            font-size: 1.2em;
+            font-size: 0.84em; /* Reduzido em 30% de 1.2em (1.2 * 0.7 = 0.84) */
+            color: black; /* Cor do texto do status para preto */
           }
           #qr-display {
             width: 250px;
             height: 250px;
-            border: 1px solid #555;
+            border: 1px solid #ccc; /* Borda mais suave para fundo branco */
             display: flex;
             align-items: center;
             justify-content: center;
@@ -125,12 +126,12 @@ app.get('/', async (req, res) => {
             text-align: center;
           }
           #reset-link {
-            color: #007bff; /* Azul para o link */
+            color: black; /* Cor do link para preto */
             text-decoration: underline;
             cursor: pointer;
           }
           #reset-link:hover {
-            color: #0056b3;
+            color: #333;
           }
         </style>
       </head>
@@ -143,7 +144,6 @@ app.get('/', async (req, res) => {
         <a href="#" id="reset-link">Resetar Sessão do Bot</a>
 
         <script>
-          const BOT_WEBHOOK_URL = 'https://vivya-whatsbot-production.up.railway.app'; // Certifique-se de que esta URL está correta
           let currentQrImageBase64 = "";
 
           async function fetchStatusAndQrImage() {
@@ -213,6 +213,8 @@ app.get('/', async (req, res) => {
             statusLine.textContent = '🔄 Reiniciando sessão...';
 
             try {
+              // Certifique-se que BOT_WEBHOOK_URL está definida e acessível.
+              // As crases foram escapadas conforme sua última instrução.
               const botResetUrl = \`${BOT_WEBHOOK_URL}/reset-session\`;
               const res = await fetch(botResetUrl, {
                 method: 'POST',
@@ -226,11 +228,13 @@ app.get('/', async (req, res) => {
                 await fetchStatusAndQrImage(); // Atualiza o status e QR imediatamente
               } else {
                 const errorText = await res.text();
+                // As crases foram escapadas conforme sua última instrução.
                 alert(\`Erro ao resetar a sessão: \${res.status} - \${errorText}\`);
                 console.error('Erro ao resetar sessão:', res.status, errorText);
               }
             } catch (err) {
-              alert('Erro de rede ao tentar resetar a sessão do bot. Verifique a URL ou a conexão.');
+              // As crases foram escapadas conforme sua última instrução.
+              alert(\`Erro de rede ao tentar resetar a sessão do bot. Verifique a URL ou a conexão.\`);
               console.error('Erro de rede no reset:', err);
             } finally {
               // A UI será atualizada pelo fetchStatusAndQrImage ou pelo próximo ciclo do setInterval
